@@ -146,21 +146,34 @@ function Resolve-ClaudeInstall {
         }
     }
 
-    # 3. Installer build: registry entries first, then the usual locations.
-    $dirs = New-Object System.Collections.Generic.List[string]
-    foreach ($root in @(
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
-        Get-ItemProperty $root -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -like '*Claude*' -and $_.InstallLocation } |
-            ForEach-Object { $dirs.Add($_.InstallLocation) }
-    }
-    $dirs.Add((Join-Path $env:LOCALAPPDATA 'AnthropicClaude'))
-    $dirs.Add((Join-Path $env:LOCALAPPDATA 'Programs\Claude'))
-    $dirs.Add((Join-Path $env:ProgramFiles 'Claude'))
-    if (${env:ProgramFiles(x86)}) { $dirs.Add((Join-Path ${env:ProgramFiles(x86)} 'Claude')) }
+# 3. Installer build.
+# Prefer the standard Claude Desktop Squirrel location.
+# This avoids confusing Claude Desktop with Claude/Claude Code packages
+# registered by WinGet or other Anthropic tools.
+$dirs = New-Object System.Collections.Generic.List[string]
 
+$dirs.Add((Join-Path $env:LOCALAPPDATA 'AnthropicClaude'))
+$dirs.Add((Join-Path $env:LOCALAPPDATA 'Programs\Claude'))
+$dirs.Add((Join-Path $env:ProgramFiles 'Claude'))
+if (${env:ProgramFiles(x86)}) {
+    $dirs.Add((Join-Path ${env:ProgramFiles(x86)} 'Claude'))
+}
+
+# Registry locations are fallback candidates only.
+foreach ($root in @(
+    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+
+    Get-ItemProperty $root -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.DisplayName -like '*Claude*' -and
+            $_.InstallLocation
+        } |
+        ForEach-Object {
+            $dirs.Add($_.InstallLocation)
+        }
+}
     foreach ($dir in $dirs) {
         if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) { continue }
         $exe = Join-Path $dir 'Claude.exe'
@@ -272,6 +285,8 @@ function Start-ClaudeProfile {
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
+	
+
     # -WindowStyle Normal matters: shortcuts run us hidden, and without an explicit
     # show state Claude would inherit ours and start with an invisible window.
     Start-Process -FilePath $script:ClaudeExe -ArgumentList "--user-data-dir=`"$path`"" -WindowStyle Normal
